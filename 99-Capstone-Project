@@ -1,0 +1,406 @@
+%md-sandbox
+
+<div style="text-align: center; line-height: 0; padding-top: 9px;">
+  <img src="https://databricks.com/wp-content/uploads/2018/03/db-academy-rgb-1200px.png" alt="Databricks Learning" style="width: 600px; height: 163px">
+</div>
+
+#################################################################################################################################################################################
+
+%md
+# Capstone Project: Managing the Machine Learning Lifecycle
+
+Create a workflow that includes pre-processing logic, the optimal ML algorithm and hyperparameters, and post-processing logic.
+
+## Instructions
+
+In this course, we've primarily used Random Forest in `sklearn` to model the Airbnb dataset.  In this exercise, perform the following tasks:
+<br><br>
+0. Create custom pre-processing logic to featurize the data
+0. Try a number of different algorithms and hyperparameters.  Choose the most performant solution
+0. Create related post-processing logic
+0. Package the results and execute it as its own run
+
+## Prerequisites
+- Web browser: Chrome
+- A cluster configured with **8 cores** and **DBR 7.0 ML**
+
+#################################################################################################################################################################################
+
+%md
+## ![Spark Logo Tiny](https://files.training.databricks.com/images/105/logo_spark_tiny.png) Classroom-Setup
+
+For each lesson to execute correctly, please make sure to run the **`Classroom-Setup`** cell at the<br/>
+start of each lesson (see the next cell) and the **`Classroom-Cleanup`** cell at the end of each lesson.
+
+#################################################################################################################################################################################
+
+%run "./Includes/Classroom-Setup"
+
+#################################################################################################################################################################################
+
+# Adust our working directory from what DBFS sees to what python actually sees
+working_path = workingDir.replace("dbfs:", "/dbfs")
+
+#################################################################################################################################################################################
+
+%md
+## Pre-processing
+
+Take a look at the dataset and notice that there are plenty of strings and `NaN` values present. Our end goal is to train a sklearn regression model to predict the price of an airbnb listing.
+
+
+Before we can start training, we need to pre-process our data to be compatible with sklearn models by making all features purely numerical. 
+
+#################################################################################################################################################################################
+
+import pandas as pd
+
+airbnbDF = spark.read.parquet("/mnt/training/airbnb/sf-listings/sf-listings-correct-types.parquet").toPandas()
+
+display(airbnbDF)
+
+#################################################################################################################################################################################
+
+%md
+In the following cells we will walk you through the most basic pre-processing step necessary. Feel free to add additional steps afterwards to improve your model performance.
+
+#################################################################################################################################################################################
+
+%md
+
+First, convert the `price` from a string to a float since the regression model will be predicting numerical values.
+
+#################################################################################################################################################################################
+
+# TODO
+
+#################################################################################################################################################################################
+
+%md
+Take a look at our remaining columns with strings (or numbers) and decide if you would like to keep them as features or not.
+
+Remove the features you decide not to keep.
+
+#################################################################################################################################################################################
+
+# TODO
+
+#################################################################################################################################################################################
+
+%md
+
+For the string columns that you've decided to keep, pick a numerical encoding for the string columns. Don't forget to deal with the `NaN` entries in those columns first.
+
+#################################################################################################################################################################################
+
+# TODO
+
+#################################################################################################################################################################################
+
+%md
+Before we create a train test split, check that all your columns are numerical. Remember to drop the original string columns after creating numerical representations of them.
+
+Make sure to drop the price column from the training data when doing the train test split.
+
+#################################################################################################################################################################################
+
+# TODO
+from sklearn.model_selection import train_test_split
+
+#################################################################################################################################################################################
+
+%md
+## Model
+
+After cleaning our data, we can start creating our model!
+
+#################################################################################################################################################################################
+
+%md
+
+Firstly, if there are still `NaN`'s in your data, you may want to impute these values instead of dropping those entries entirely. Make sure that any further processing/imputing steps after the train test split is part of a model/pipeline that can be saved.
+
+In the following cell, create and fit a single sklearn model.
+
+#################################################################################################################################################################################
+
+# TODO
+
+#################################################################################################################################################################################
+
+%md
+Pick and calculate a regression metric for evaluating your model.
+
+#################################################################################################################################################################################
+
+# TODO
+
+#################################################################################################################################################################################
+
+%md
+
+Log your model on MLflow with the same metric you calculated above so we can compare all the different models you have tried! Make sure to also log any hyperparameters that you plan on tuning!
+
+#################################################################################################################################################################################
+
+# TODO
+import mlflow.sklearn
+
+#################################################################################################################################################################################
+
+%md
+
+Change and re-run the above 3 code cells to log different models and/or models with different hyperparameters until you are satisfied with the performance of at least 1 of them.
+
+#################################################################################################################################################################################
+
+%md
+
+Look through the MLflow UI for the best model. Copy its `URI` so you can load it as a `pyfunc` model.
+
+#################################################################################################################################################################################
+
+# TODO
+import mlflow.pyfunc
+
+#################################################################################################################################################################################
+
+%md
+## Post-processing
+
+Our model currently gives us the predicted price per night for each Airbnb listing. Now we would like our model to tell us what the price per person would be for each listing, assuming the number of renters is equal to the `accommodates` value. 
+
+#################################################################################################################################################################################
+
+%md-sandbox
+Fill in the following model class to add in a post-processing step which will get us from total price per night to **price per person per night**.
+
+<img alt="Side Note" title="Side Note" style="vertical-align: text-bottom; position: relative; height:1.75em; top:0.05em; transform:rotate(15deg)" src="https://files.training.databricks.com/static/images/icon-note.webp"/> Check out <a href="https://www.mlflow.org/docs/latest/models.html#id13" target="_blank">the MLFlow docs for help.</a>
+
+#################################################################################################################################################################################
+
+# TODO
+
+class Airbnb_Model(mlflow.pyfunc.PythonModel):
+
+    def __init__(self, model):
+        self.model = model
+    
+    def predict(self, context, model_input):
+        # FILL_IN
+
+#################################################################################################################################################################################
+
+%md
+Construct and save the model to the given `final_model_path`.
+
+#################################################################################################################################################################################
+
+# TODO
+final_model_path =  f"{working_path}/final-model"
+
+# FILL_IN
+
+#################################################################################################################################################################################
+
+%md
+Load the model in `python_function` format and apply it to our test data `X_test` to check that we are getting price per person predictions now.
+
+#################################################################################################################################################################################
+
+# TODO
+
+#################################################################################################################################################################################
+
+%md
+## Packaging your Model
+
+Now we would like to package our completed model! 
+
+#################################################################################################################################################################################
+
+%md-sandbox
+First save your testing data at `test_data_path` so we can test the packaged model.
+
+<img alt="Hint" title="Hint" style="vertical-align: text-bottom; position: relative; height:1.75em; top:0.3em" src="https://files.training.databricks.com/static/images/icon-light-bulb.svg"/>&nbsp;**Hint:** When using `.to_csv` make sure to set `index=False` so you don't end up with an extra index column in your saved dataframe.
+
+#################################################################################################################################################################################
+
+# TODO
+save the testing data 
+test_data_path = f"{working_path}/test_data.csv"
+# FILL_IN
+
+prediction_path = f"{working_path}/predictions.csv"
+
+#################################################################################################################################################################################
+
+%md
+First we will determine what the project script should do. Fill out the `model_predict` function to load out the trained model you just saved (at `final_model_path`) and make price per person predictions on the data at `test_data_path`. Then those predictions should be saved under `prediction_path` for the user to access later.
+
+Run the cell to check that your function is behaving correctly and that you have predictions saved at `demo_prediction_path`.
+
+#################################################################################################################################################################################
+
+# TODO
+import click
+import mlflow.pyfunc
+import pandas as pd
+
+@click.command()
+@click.option("--final_model_path", default="", type=str)
+@click.option("--test_data_path", default="", type=str)
+@click.option("--prediction_path", default="", type=str)
+def model_predict(final_model_path, test_data_path, prediction_path):
+    # FILL_IN
+
+
+# test model_predict function    
+demo_prediction_path = f"{working_path}/predictions.csv"
+
+from click.testing import CliRunner
+runner = CliRunner()
+result = runner.invoke(model_predict, ['--final_model_path', final_model_path, 
+                                       '--test_data_path', test_data_path,
+                                       '--prediction_path', demo_prediction_path], catch_exceptions=True)
+
+assert result.exit_code == 0, "Code failed" # Check to see that it worked
+print("Price per person predictions: ")
+print(pd.read_csv(demo_prediction_path))
+
+#################################################################################################################################################################################
+
+%md
+Next, we will create a MLproject file and put it under our `workingDir`. Complete the parameters and command of the file.
+
+#################################################################################################################################################################################
+
+# TODO
+dbutils.fs.put(f"{workingDir}/MLproject", 
+'''
+name: Capstone-Project
+
+conda_env: conda.yaml
+
+entry_points:
+  main:
+    parameters:
+      #FILL_IN
+    command:  "python predict.py #FILL_IN"
+'''.strip(), overwrite=True)
+
+#################################################################################################################################################################################
+
+print(prediction_path)
+
+#################################################################################################################################################################################
+
+%md
+We then create a `conda.yaml` file to list the dependencies needed to run our script.
+
+For simplicity, we will ensure we use the same version as we are running in this notebook.
+
+#################################################################################################################################################################################
+
+import cloudpickle, numpy, pandas, sklearn, sys
+
+version = sys.version_info # Handles possibly conflicting Python versions
+
+file_contents = f"""
+name: Capstone
+channels:
+  - defaults
+dependencies:
+  - python={version.major}.{version.minor}.{version.micro}
+  - cloudpickle={cloudpickle.__version__}
+  - numpy={numpy.__version__}
+  - pandas={pandas.__version__}
+  - scikit-learn={sklearn.__version__}
+  - pip:
+    - mlflow=={mlflow.__version__}
+""".strip()
+
+dbutils.fs.put(f"{workingDir}/conda.yaml", file_contents, overwrite=True)
+
+print(file_contents)
+
+#################################################################################################################################################################################
+
+%md
+Now we will put the **`predict.py`** script into our project package.
+
+Complete the **`.py`** file by copying and placing the **`model_predict`** function you defined above.
+
+#################################################################################################################################################################################
+
+# TODO
+dbutils.fs.put(f"{workingDir}/predict.py", 
+'''
+import click
+import mlflow.pyfunc
+import pandas as pd
+
+# put model_predict function with decorators here
+    
+if __name__ == "__main__":
+  model_predict()
+
+'''.strip(), overwrite=True)
+
+#################################################################################################################################################################################
+
+%md
+Let's double check all the files we've created are in the `workingDir` folder. You should have at least the following 3 files:
+* `MLproject`
+* `conda.yaml`
+* `predict.py`
+
+#################################################################################################################################################################################
+
+display( dbutils.fs.ls(workingDir) )
+
+#################################################################################################################################################################################
+
+%md
+Under **`workingDir`** is your completely packaged project.
+
+Run the project to use the model saved at **`final_model_path`** to predict the price per person of each Airbnb listing in **`test_data_path`** and save those predictions under **`second_prediction_path`** (defined below).
+
+#################################################################################################################################################################################
+
+# TODO
+second_prediction_path = f"{working_path}/predictions-2.csv"
+mlflow.projects.run(working_path,
+   # FILL_IN
+)
+
+#################################################################################################################################################################################
+
+%md
+Run the following cell to check that your model's predictions are there!
+
+#################################################################################################################################################################################
+
+print("Price per person predictions: ")
+print(pd.read_csv(second_prediction_path))
+
+#################################################################################################################################################################################
+
+%md
+## ![Spark Logo Tiny](https://files.training.databricks.com/images/105/logo_spark_tiny.png) Classroom-Cleanup<br>
+
+Run the **`Classroom-Cleanup`** cell below to remove any artifacts created by this lesson.
+
+#################################################################################################################################################################################
+
+%run "./Includes/Classroom-Cleanup"
+
+#################################################################################################################################################################################
+
+%md
+
+<h2><img src="https://files.training.databricks.com/images/105/logo_spark_tiny.png"> All done!</h2>
+
+Thank you for your participation!
+
+#################################################################################################################################################################################
