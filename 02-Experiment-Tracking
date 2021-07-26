@@ -1,0 +1,454 @@
+%md-sandbox
+<img src="https://mlflow.org/docs/latest/_static/MLflow-logo-final-black.png" style="float: left: margin: 20px; height:5em"/>
+# Course Overview and Setup
+## MLflow: Managing the Machine Learning Lifecycle
+
+In this course data scientists and data engineers learn the best practices for managing experiments, projects, and models using MLflow.
+
+By the end of this course, you will have built a pipeline to log and deploy machine learning models using the environment they were trained with.
+
+## Lessons
+
+0. Experiment Tracking 
+0. Packaging ML Projects
+0. Multistep Workflows
+0. Model Management 
+
+## Audience
+* Primary Audience: Data Governance, Data Scientists, and Data Analysts
+* Additional Audiences: Data Engineers
+
+###################################################################################################################################################################################
+
+%md
+# Experiment Tracking
+
+The machine learning life cycle involves training multiple algorithms using different hyperparameters and libraries, all with different performance results and trained models.  This lesson explores tracking those experiments to organize the machine learning life cycle.
+
+## ![Spark Logo Tiny](https://files.training.databricks.com/images/105/logo_spark_tiny.png) In this lesson:<br>
+ - Introduce tracking ML experiments in MLflow
+ - Log an experiment and explore the results in the UI
+ - Record parameters, metrics, and a model
+ - Query past runs programatically
+ 
+###################################################################################################################################################################################
+
+%md-sandbox
+### Tracking Experiments with MLflow
+
+Over the course of the machine learning life cycle, data scientists test many different models from various libraries with different hyperparameters.  Tracking these various results poses an organizational challenge.  In brief, storing experiments, results, models, supplementary artifacts, and code creates significant challenges.
+
+MLflow Tracking is one of the three main components of MLflow.  It is a logging API specific for machine learning and agnostic to libraries and environments that do the training.  It is organized around the concept of **runs**, which are executions of data science code.  Runs are aggregated into **experiments** where many runs can be a part of a given experiment and an MLflow server can host many experiments.
+
+Each run can record the following information:<br><br>
+
+- **Parameters:** Key-value pairs of input parameters such as the number of trees in a random forest model
+- **Metrics:** Evaluation metrics such as RMSE or Area Under the ROC Curve
+- **Artifacts:** Arbitrary output files in any format.  This can include images, pickled models, and data files
+- **Source:** The code that originally ran the experiment
+
+MLflow tracking also serves as a **model registry** so tracked models can easily be stored and, as necessary, deployed into production.
+
+Experiments can be tracked using libraries in Python, R, and Java as well as by using the CLI and REST calls.  This course will use Python, though the majority of MLflow functionality is also exposed in these other APIs.
+
+<div><img src="https://files.training.databricks.com/images/eLearning/ML-Part-4/mlflow-tracking.png" style="height: 400px; margin: 20px"/></div>
+
+###################################################################################################################################################################################
+
+%md
+### Setup Steps: Experiment Logging and UI
+
+MLflow is an open source software project developed by Databricks available to developers regardless of which platform they are using.  Databricks hosts MLflow for you, which reduces deployment configuration and adds security benefits.  It is accessible on all Databricks workspaces in Azure and AWS.  It is not currently enabled on Community Edition
+
+See <a href="https://mlflow.org/docs/latest/quickstart.html#" target="_blank">the MLflow quickstart guide</a> for details on setting up MLflow locally or on your own server.
+
+###################################################################################################################################################################################
+
+%md
+Databricks uses two different versions of its software.  The **Databricks Runtime** does not currently come with MLflow pre-installed.  if you are using Databricks runtime, uncomment the code below and run it to install `mlflow`.
+
+###################################################################################################################################################################################
+
+# This installs MLflow for you only on Databricks Runtime
+# NOTE: this code does not work with ML runtime (see below)
+
+# dbutils.library.installPyPI("mlflow", "1.0.0")
+# dbutils.library.restartPython()
+
+###################################################################################################################################################################################
+
+%md
+The other version of Databricks is the **Machine Learning Runtime,** which you'll notice has `ML` next to the cluster type.  **Machine Learning Runtime has `mlflow` pre-installed starting at version 5.5.**  If you have runtime **5.5 ML or later** available to you, you do not need to install `mlflow`.
+
+If your version of Machine Learning Runtime is lower than 5.5, please install the library `mlflow==1.0.0` using `PyPi` manually.  <a href="https://files.training.databricks.com/static/step-by-step/installing-libraries-from-pypi.html" target="_blank">See the instructions on how to install a library from PyPi</a> if you're unfamiliar with the process
+
+###################################################################################################################################################################################
+
+%md
+### OK, Let's start our data science workflow!
+Import a dataset of Airbnb listings and featurize the data.  We'll use this to train a model.
+
+If you are running the below code on Community Edition with DBR 7.0+, please replace it with `df = spark.read.csv("/mnt/training/airbnb/sf-listings/airbnb-cleaned-mlflow.csv", header = True).toPandas()`.
+
+###################################################################################################################################################################################
+
+%run "./Includes/Classroom-Setup"
+
+###################################################################################################################################################################################
+
+import pandas as pd
+
+df = pd.read_csv("/dbfs/mnt/training/airbnb/sf-listings/airbnb-cleaned-mlflow.csv")
+
+###################################################################################################################################################################################
+
+%md
+Perform a train/test split.
+
+###################################################################################################################################################################################
+
+from sklearn.model_selection import train_test_split
+
+X_train, X_test, y_train, y_test = train_test_split(df.drop(["price"], axis=1), df[["price"]].values.ravel(), random_state=42)
+
+###################################################################################################################################################################################
+
+display(X_train)
+
+###################################################################################################################################################################################
+
+%md-sandbox
+**Navigate to the MLflow UI by clicking on the `Runs` button on the top of the screen.**
+
+Every Python notebook in a Databricks Workspace has its own experiment. When you use MLflow in a notebook, it records runs in the notebook experiment. A notebook experiment shares the same name and ID as its corresponding notebook. 
+
+###################################################################################################################################################################################
+
+%md
+Log a basic experiment by doing the following:<br><br>
+
+1. Start an experiment using `mlflow.start_run()` and passing it a name for the run
+2. Train your model
+3. Log the model using `mlflow.sklearn.log_model()`
+4. Log the model error using `mlflow.log_metric()`
+5. Print out the run id using `run.info.run_uuid`
+
+###################################################################################################################################################################################
+
+import mlflow.sklearn
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.metrics import mean_squared_error
+
+with mlflow.start_run(run_name="Basic RF Experiment") as run:
+  # Create model, train it, and create predictions
+  rf = RandomForestRegressor()
+  rf.fit(X_train, y_train)
+  predictions = rf.predict(X_test)
+  
+  # Log model
+  mlflow.sklearn.log_model(rf, "random-forest-model")
+  
+  # Create metrics
+  mse = mean_squared_error(y_test, predictions)
+  print("  mse: {}".format(mse))
+  
+  # Log metrics
+  mlflow.log_metric("mse", mse)
+  
+  runID = run.info.run_uuid
+  experimentID = run.info.experiment_id
+  
+  print("Inside MLflow Run with run_id {} and experiment_id {}".format(runID, experimentID))
+
+###################################################################################################################################################################################
+
+%md
+Now let's take a look at the `Runs` tab again!
+
+###################################################################################################################################################################################
+
+%md-sandbox
+### Parameters, Metrics, and Artifacts
+
+But wait, there's more!  In the last example, you logged the run name, an evaluation metric, and your model itself as an artifact.  Now let's log parameters, multiple metrics, and other artifacts including the feature importances.
+
+First, create a function to perform this.
+
+To log artifacts, we have to save them somewhere before MLflow can log them.  This code accomplishes that by using a temporary file that it then deletes.
+
+###################################################################################################################################################################################
+
+def log_rf(experimentID, run_name, params, X_train, X_test, y_train, y_test):
+  import os
+  import matplotlib.pyplot as plt
+  import mlflow.sklearn
+  import seaborn as sns
+  from sklearn.ensemble import RandomForestRegressor
+  from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
+  import tempfile
+
+  with mlflow.start_run(experiment_id=experimentID, run_name=run_name) as run:
+    # Create model, train it, and create predictions
+    rf = RandomForestRegressor(**params)
+    rf.fit(X_train, y_train)
+    predictions = rf.predict(X_test)
+
+    # Log model
+    mlflow.sklearn.log_model(rf, "random-forest-model")
+
+    # Log params
+    [mlflow.log_param(param, value) for param, value in params.items()]
+
+    # Create metrics
+    mse = mean_squared_error(y_test, predictions)
+    mae = mean_absolute_error(y_test, predictions)
+    r2 = r2_score(y_test, predictions)
+    print("  mse: {}".format(mse))
+    print("  mae: {}".format(mae))
+    print("  R2: {}".format(r2))
+
+    # Log metrics
+    mlflow.log_metric("mse", mse)
+    mlflow.log_metric("mae", mae)  
+    mlflow.log_metric("r2", r2)  
+    
+    # Create feature importance
+    importance = pd.DataFrame(list(zip(df.columns, rf.feature_importances_)), 
+                                columns=["Feature", "Importance"]
+                              ).sort_values("Importance", ascending=False)
+    
+    # Log importances using a temporary file
+    temp = tempfile.NamedTemporaryFile(prefix="feature-importance-", suffix=".csv")
+    temp_name = temp.name
+    try:
+      importance.to_csv(temp_name, index=False)
+      mlflow.log_artifact(temp_name, "feature-importance.csv")
+    finally:
+      temp.close() # Delete the temp file
+    
+    # Create plot
+    fig, ax = plt.subplots()
+
+    sns.residplot(predictions, y_test, lowess=True)
+    plt.xlabel("Predicted values for Price ($)")
+    plt.ylabel("Residual")
+    plt.title("Residual Plot")
+
+    # Log residuals using a temporary file
+    temp = tempfile.NamedTemporaryFile(prefix="residuals-", suffix=".png")
+    temp_name = temp.name
+    try:
+      fig.savefig(temp_name)
+      mlflow.log_artifact(temp_name, "residuals.png")
+    finally:
+      temp.close() # Delete the temp file
+      
+    display(fig)
+    return run.info.run_uuid
+
+###################################################################################################################################################################################
+
+%md
+We can also use MLflow Autologging to automatically log all parameters of interest with sklearn or any other supported library:
+
+###################################################################################################################################################################################
+
+def log_rf_auto(experimentID, run_name, params, X_train, X_test, y_train, y_test):
+  import mlflow.sklearn
+  from sklearn.ensemble import RandomForestRegressor
+  from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
+
+  with mlflow.start_run(experiment_id=experimentID, run_name=run_name) as run:
+    #Use Autologging
+    mlflow.sklearn.autolog()
+    
+    # Create model, train it, and create predictions
+    rf = RandomForestRegressor(**params)
+    rf.fit(X_train, y_train)
+    predictions = rf.predict(X_test)
+
+    # Create metrics
+    mse = mean_squared_error(y_test, predictions)
+    mae = mean_absolute_error(y_test, predictions)
+    r2 = r2_score(y_test, predictions)
+    print("  mse: {}".format(mse))
+    print("  mae: {}".format(mae))
+    print("  R2: {}".format(r2))
+    
+    return run.info.run_uuid
+
+###################################################################################################################################################################################
+
+%md
+Run with new parameters.
+
+###################################################################################################################################################################################
+
+params = {
+  "n_estimators": 100,
+  "max_depth": 5,
+  "random_state": 42
+}
+
+log_rf(experimentID, "Second Run", params, X_train, X_test, y_train, y_test)
+
+###################################################################################################################################################################################
+
+%md
+Check the UI to see how this appears.  Take a look at the artifact to see where the plot was saved.
+
+Now, run a third run.
+
+###################################################################################################################################################################################
+
+params_1000_trees = {
+  "n_estimators": 500,
+  "max_depth": 10,
+  "random_state": 42
+}
+
+log_rf_auto(experimentID, "Autologged Run", params_1000_trees, X_train, X_test, y_train, y_test)
+
+###################################################################################################################################################################################
+
+%md
+Explore the MLflow UI in detail. Next, we will interact with MLflow programmatically.
+
+###################################################################################################################################################################################
+
+%md-sandbox
+### Querying Past Runs
+
+You can query past runs programatically in order to use this data back in Python.  The pathway to doing this is an `MlflowClient` object. 
+
+<img alt="Side Note" title="Side Note" style="vertical-align: text-bottom; position: relative; height:1.75em; top:0.05em; transform:rotate(15deg)" src="https://files.training.databricks.com/static/images/icon-note.webp"/> You can also set tags for runs using `client.set_tag(run.info.run_uuid, "tag_key", "tag_value")`
+
+###################################################################################################################################################################################
+
+from mlflow.tracking import MlflowClient
+client = MlflowClient()
+
+###################################################################################################################################################################################
+
+%md
+Now list all the runs for your experiment using `.list_run_infos()`, which takes your `experiment_id` as a parameter.
+
+###################################################################################################################################################################################
+
+display(client.list_run_infos(experimentID))
+
+###################################################################################################################################################################################
+
+%md
+We can list the artifacts for any run by using the `MLflowClient().list_artifacts(run_id)` method:
+
+###################################################################################################################################################################################
+
+client.list_artifacts(runID)
+
+###################################################################################################################################################################################
+
+%md
+Pull out a few fields and create a pandas DataFrame with it.
+
+###################################################################################################################################################################################
+
+runs = pd.DataFrame([(run.run_uuid, run.start_time, run.artifact_uri) for run in client.list_run_infos(experimentID)])
+runs.columns = ["run_uuid", "start_time", "artifact_uri"]
+
+display(runs)
+
+###################################################################################################################################################################################
+
+%md
+Pull the last run and take a look at the associated artifacts.
+
+###################################################################################################################################################################################
+
+rf_run = runs.sort_values("start_time", ascending=False).iloc[2]
+client.list_artifacts(rf_run["run_uuid"])
+
+###################################################################################################################################################################################
+
+%md
+Return the evaluation metrics for the last run.
+
+###################################################################################################################################################################################
+
+client.get_run(rf_run.run_uuid).data.metrics
+
+###################################################################################################################################################################################
+
+%md
+Reload the model and take a look at the feature importance.
+
+###################################################################################################################################################################################
+
+import mlflow.sklearn
+
+model = mlflow.sklearn.load_model(rf_run.artifact_uri+"/random-forest-model")
+model.feature_importances_
+
+###################################################################################################################################################################################
+
+%md
+## ![Spark Logo Tiny](https://files.training.databricks.com/images/105/logo_spark_tiny.png) Classroom-Cleanup<br>
+
+Run the **`Classroom-Cleanup`** cell below to remove any artifacts created by this lesson.
+
+###################################################################################################################################################################################
+
+%run "./Includes/Classroom-Cleanup"
+
+###################################################################################################################################################################################
+
+%md
+## ![Spark Logo Tiny](https://files.training.databricks.com/images/105/logo_spark_tiny.png) Next Steps
+
+Start the labs for this lesson, Experiment Tracking Lab 
+
+###################################################################################################################################################################################
+
+%md
+## Review
+**Question:** What can MLflow Tracking log?  
+**Answer:** MLflow can log the following:
+- **Parameters:** inputs to a model
+- **Metrics:** the performance of the model
+- **Artifacts:** any object including data, models, and images
+- **Source:** the original code, including the commit hash if linked to git
+
+**Question:** How do you log experiments?  
+**Answer:** Experiments are logged by first creating a run and using the logging methods on that run object (e.g. `run.log_param("MSE", .2)`).
+
+**Question:** Where do logged artifacts get saved?  
+**Answer:** Logged artifacts are saved in a directory of your choosing.  On Databricks, this would be DBFS, or the Databricks File System, which backed by a blob store.
+
+**Question:** How can I query past runs?  
+**Answer:** This can be done using an `MlflowClient` object.  This allows you do everything you can within the UI programatically so you never have to step outside of your programming environment.
+
+###################################################################################################################################################################################
+
+%md
+## Additional Topics & Resources
+
+**Q:** What is MLflow at a high level?  
+**A:** <a href="https://databricks.com/session/accelerating-the-machine-learning-lifecycle-with-mlflow-1-0" target="_blank">Listen to Spark and MLflow creator Matei Zaharia's talk at Spark Summit in 2019.</a>
+
+**Q:** What is a good source for the larger context of machine learning tools?  
+**A:** <a href="https://roaringelephant.org/2019/06/18/episode-145-alex-zeltov-on-mlops-with-mlflow-kubeflow-and-other-tools-part-1/#more-1958" target="_blank">Check out this episode of the podcast Roaring Elephant.</a>
+
+**Q:** Where can I find the MLflow docs?
+**A:** <a href="https://www.mlflow.org/docs/latest/index.html" target="_blank">You can find the docs here.</a>
+
+**Q:** What is a good general resource for machine learning?  
+**A:** <a href="https://www-bcf.usc.edu/~gareth/ISL/" target="_blank">_An Introduction to Statistical Learning_</a> is a good starting point for the themes and basic approaches to machine learning.
+
+**Q:** Where can I find out more information on machine learning with Spark?
+**A:** Check out the Databricks blog <a href="https://databricks.com/blog/category/engineering/machine-learning" target="_blank">dedicated to machine learning</a>
+
+###################################################################################################################################################################################
+
+%md-sandbox
+Apache, Apache Spark, Spark and the Spark logo are trademarks of the <a href="http://www.apache.org/">Apache Software Foundation</a>.<br/>
+<br/>
