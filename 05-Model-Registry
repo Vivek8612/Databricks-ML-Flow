@@ -1,0 +1,507 @@
+%md
+# Model Registry
+
+MLflow already has the ability to track metrics, parameters, and artifacts as part of experiments; package models and reproducible ML projects; and deploy models to batch or real-time serving platforms. Built on these existing capabilities, the **MLflow Model Registry** provides a central repository to manage the model deployment lifecycle.
+
+## ![Spark Logo Tiny](https://files.training.databricks.com/images/105/logo_spark_tiny.png) In this lesson you:<br>
+ - Introduce model registry for model lifecycle management
+ - Interact with the model registry UI
+ - Programmatically register and query models 
+ 
+This notebook is based off the Databricks blog post <a href="https://databricks.com/blog/2020/04/15/databricks-extends-mlflow-model-registry-with-enterprise-features.html" target="_blank">Use Model Registry APIs for integration and inspection</a>
+
+#################################################################################################################################################################################
+
+%md
+### Managing the model lifecycle with Model Registry
+
+One of the primary challenges among data scientists in a large organization is the absence of a central repository to collaborate, share code, and manage deployment stage transitions for models, model versions, and their history. A centralized registry for models across an organization affords data teams the ability to:
+
+* discover registered models, current stage in model development, experiment runs, and associated code with a registered model
+* transition models to deployment stages
+* deploy different versions of a registered model in different stages, offering MLOps engineers ability to deploy and conduct testing of different model versions
+* archive older models for posterity and provenance
+* peruse model activities and annotations throughout model’s lifecycle
+* control granular access and permission for model registrations, transitions or modifications
+
+<div><img src="https://databricks.com/wp-content/uploads/2020/04/databricks-adds-access-control-to-mlflow-model-registry_01.jpg" style="height: 400px; margin: 20px"/></div>
+
+#################################################################################################################################################################################
+
+%md
+### How to Use the Model Registry
+Typically, data scientists who use MLflow will conduct many experiments, each with a number of runs that track and log metrics and parameters. 
+
+During the course of this development cycle, they will select the best run within an experiment and register its model with the registry. Thereafter, the registry will let data scientists track multiple versions over the course of model progression as they assign each version with a lifecycle stage: 
+* Staging
+* Production
+* Archived
+
+#################################################################################################################################################################################
+
+%md
+## **NOTE**: This notebook requires the latest MLflow version 
+To resolve, manually upgrade the cluster runtime version to DBR ML 7.1+ or make sure you have Conda enabled on your cluster.
+
+* Add the required Spark Config: `spark.databricks.conda.condaMagic.enabled true`
+* See here for more details: https://docs.databricks.com/release-notes/runtime/7.0ml.html#known-issues
+
+#################################################################################################################################################################################
+
+%run "./Includes/Classroom-Setup"
+
+#################################################################################################################################################################################
+
+import mlflow
+import mlflow.sklearn
+import pandas as pd
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
+from sklearn.model_selection import train_test_split
+
+df = pd.read_csv("/dbfs/mnt/training/airbnb/sf-listings/airbnb-cleaned-mlflow.csv")
+X_train, X_test, y_train, y_test = train_test_split(df.drop(["price"], axis=1), df[["price"]].values.ravel(), random_state=42)
+
+rf = RandomForestRegressor(n_estimators=100, max_depth=5)
+rf.fit(X_train, y_train)
+
+with mlflow.start_run(run_name="RF Model") as run:
+  mlflow.sklearn.log_model(rf, "model")
+  mlflow.log_metric("mse", mean_squared_error(y_test, rf.predict(X_test)))
+
+  runID = run.info.run_uuid
+
+#################################################################################################################################################################################
+
+%md Now run again with **Autologging enabled**. This way we can log a model while also capturing:
+  * The schema of input and outputs
+  * A few sample record
+  * All default and tuned parameters, metrics, etc.
+
+#################################################################################################################################################################################
+
+with mlflow.start_run(run_name="Autologged RF Model") as run:
+  #Use Autologging
+  mlflow.sklearn.autolog()
+  
+  rf = RandomForestRegressor(n_estimators=50, max_depth=10)
+  rf.fit(X_train, y_train)
+  
+  predictions = rf.predict(X_test)
+  print("RunID:", run.info.run_uuid)
+
+#################################################################################################################################################################################
+
+%md
+## 1. Model Registry UI Workflows
+The Model Registry UI is accessible from the Databricks workspace. From the Model Registry UI, you can conduct the following activities as part of your workflow:
+
+
+* Register a model from the Run’s page
+* Edit a model version description
+* Transition a model version
+* View model version activities and annotations
+* Display and search registered models
+* Delete a model version
+
+Run the cell below, which creates a new MLflow experiment similar to previous notebooks, then navigate back to the MLflow screen for this experiment.
+
+#################################################################################################################################################################################
+
+%md
+## 2. Model Registry API Workflows
+
+All aspects of the Model Registry can be called programmatically via API
+
+#################################################################################################################################################################################
+
+%md
+Create a unique model name so you don't clash with other workspace users.
+
+#################################################################################################################################################################################
+
+import uuid
+model_name = f"airbnb_rf_model_{uuid.uuid4().hex[:10]}"
+model_name
+
+#################################################################################################################################################################################
+
+model_uri = "runs:/{run_id}/model".format(run_id=runID)
+
+model_details = mlflow.register_model(model_uri=model_uri, name=model_name)
+
+#################################################################################################################################################################################
+
+%md
+ **Open the *Models* tab on the left of the screen to explore the registered model.**  
+ 
+ Note the following:<br><br>
+
+* It logged who trained the model and what code was used
+* It logged a history of actions taken on this model
+* It logged this model as a first version
+
+#################################################################################################################################################################################
+
+%md
+Check the status.  It will initially be in `PENDING_REGISTRATION` status, then `READY` when it has been async registered
+
+#################################################################################################################################################################################
+
+from mlflow.tracking.client import MlflowClient
+
+client = MlflowClient()
+model_version_details = client.get_model_version(name=model_name, version=1)
+
+model_version_details.status
+
+#################################################################################################################################################################################
+
+%md
+Now add a model description
+
+#################################################################################################################################################################################
+
+client.update_registered_model(
+  name=model_details.name,
+  description="This model forecasts Airbnb housing list prices based on various listing inputs."
+)
+
+#################################################################################################################################################################################
+
+%md
+Add a version-specific description.
+
+#################################################################################################################################################################################
+
+client.update_model_version(
+  name=model_details.name,
+  version=model_details.version,
+  description="This model version was built using sklearn."
+)
+
+#################################################################################################################################################################################
+
+%md
+### Deploying a Model
+
+The MLflow Model Registry defines several model stages: `None`, `Staging`, `Production`, and `Archived`. Each stage has a unique meaning. For example, `Staging` is meant for model testing, while `Production` is for models that have completed the testing or review processes and have been deployed to applications. 
+
+Users with appropriate permissions can transition models between stages. In private preview, any user can transition a model to any stage. In the near future, administrators in your organization will be able to control these permissions on a per-user and per-model basis.
+
+If you have permission to transition a model to a particular stage, you can make the transition directly by using the `MlflowClient.update_model_version()` function. If you do not have permission, you can request a stage transition using the REST API; for example: ```%sh curl -i -X POST -H "X-Databricks-Org-Id: <YOUR_ORG_ID>" -H "Authorization: Bearer <YOUR_ACCESS_TOKEN>" https://<YOUR_DATABRICKS_WORKSPACE_URL>/api/2.0/preview/mlflow/transition-requests/create -d '{"comment": "Please move this model into production!", "model_version": {"version": 1, "registered_model": {"name": "power-forecasting-model"}}, "stage": "Production"}'
+```
+
+Now that you've learned about stage transitions, transition the model to the `Production` stage.
+
+#################################################################################################################################################################################
+
+import time
+time.sleep(20) # In case the registration is still pending
+
+client.transition_model_version_stage(
+  name=model_details.name,
+  version=model_details.version,
+  stage='Production',
+)
+
+#################################################################################################################################################################################
+
+%md
+Fetch the model's current status.
+
+#################################################################################################################################################################################
+
+model_version_details = client.get_model_version(
+  name=model_details.name,
+  version=model_details.version,
+)
+print("The current model stage is: '{stage}'".format(stage=model_version_details.current_stage))
+
+#################################################################################################################################################################################
+
+%md
+Fetch the latest model using a `pyfunc`.  Loading the model in this way allows us to use the model regardless of the package that was used to train it.
+
+#################################################################################################################################################################################
+
+import mlflow.pyfunc
+
+model_version_uri = "models:/{model_name}/production".format(model_name=model_name)
+
+print("Loading PRODUCTION model stage with name: '{model_uri}'".format(model_uri=model_version_uri))
+model_version_1 = mlflow.pyfunc.load_model(model_version_uri)
+
+#################################################################################################################################################################################
+
+%md Apply the model on test data
+
+#################################################################################################################################################################################
+
+predictions = model_version_1.predict(X_test)
+pd.DataFrame(predictions).head(10)
+
+#################################################################################################################################################################################
+
+%md
+We have now demonstrated how a **model can be loaded from the model registry** in **any flavor** and be used to **make predictions on new data**, all with the help of the model registry!
+
+#################################################################################################################################################################################
+
+%md
+### Deploying a New Model Version
+
+The MLflow Model Registry enables you to create multiple model versions corresponding to a single registered model. By performing stage transitions, you can seamlessly integrate new model versions into your staging or production environments.
+
+Create a new model version and register that model when it's logged.
+
+#################################################################################################################################################################################
+
+df = pd.read_csv("/dbfs/mnt/training/airbnb/sf-listings/airbnb-cleaned-mlflow.csv")
+X_train, X_test, y_train, y_test = train_test_split(df.drop(["price"], axis=1), df[["price"]].values.ravel(), random_state=42)
+
+rf = RandomForestRegressor(n_estimators=300, max_depth=10)
+rf.fit(X_train, y_train)
+
+with mlflow.start_run(run_name="RF Model") as run:
+  # Specify the `registered_model_name` parameter of the `mlflow.sklearn.log_model()`
+  # function to register the model with the MLflow Model Registry. This automatically
+  # creates a new model version
+  mlflow.sklearn.log_model(
+    sk_model=rf,
+    artifact_path="sklearn-model",
+    registered_model_name=model_name,
+  )
+  mlflow.log_metric("mse", mean_squared_error(y_test, rf.predict(X_test)))
+
+  experiment_id = run.info.experiment_id
+  runID = run.info.run_uuid
+
+#################################################################################################################################################################################
+
+%md
+Go back to the Models UI to see that a new version has been added to your model.
+
+
+Now, use the search functionality to grab the latest model version.
+
+#################################################################################################################################################################################
+
+model_version_infos = client.search_model_versions(f"name = '{model_name}'")
+new_model_version = max([model_version_info.version for model_version_info in model_version_infos])
+
+#################################################################################################################################################################################
+
+%md
+Put this new model version into `Staging`
+
+#################################################################################################################################################################################
+
+time.sleep(20)
+
+client.transition_model_version_stage(
+  name=model_name,
+  version=new_model_version,
+  stage='Staging',
+)
+
+#################################################################################################################################################################################
+
+%md
+Return to the Models tab to see this change
+
+#################################################################################################################################################################################
+
+%md 
+### Model serving
+
+#################################################################################################################################################################################
+
+X_test.iloc[0:4]
+
+#################################################################################################################################################################################
+
+X_test.iloc[0:4].to_json(orient='records')
+
+#################################################################################################################################################################################
+
+%md 
+#### Examples of REST API usage
+
+#################################################################################################################################################################################
+
+import requests
+import json
+
+# Put your token, host, and model name here to make requests
+YOUR_TOKEN = ''
+host = "https://{WORKSPACE_URL}.cloud.databricks.com"
+
+auth = ('token', YOUR_PERSONAL_ACCESS_TOKEN)
+def print_response(resp):
+  print("%s %s" % (resp.status_code, resp.reason))
+  if resp.status_code == 200:
+    print(json.dumps(resp.json(), sort_keys=True, indent=4, separators=(',', ': ')))
+  else:
+    print(resp.text)
+
+#################################################################################################################################################################################
+
+#Get Endpoint Status
+resp = requests.get("%s/api/2.0/preview/mlflow/endpoints/get-status?registered_model_name=%s" % (host, modelName), auth=auth)
+print_response(resp)
+
+#################################################################################################################################################################################
+
+#List Versions
+resp = requests.get("%s/api/2.0/preview/mlflow/endpoints/list-versions?registered_model_name=%s" % (host, modelName), auth=auth)
+print_response(resp)
+
+#################################################################################################################################################################################
+
+#Get Version Logs
+resp = requests.post("%s/api/2.0/preview/mlflow/endpoints/get-version-logs" % host, auth=auth,
+                    data=json.dumps({'registered_model_name': modelName, "endpoint_version_name": "1"}))
+print(resp.json()["logs"])
+
+#################################################################################################################################################################################
+
+# Get Event History
+resp = requests.get("%s/api/2.0/preview/mlflow/endpoints/get-event-history?registered_model_name=%s" % (host, modelName), auth=auth)
+print_response(resp)
+
+#################################################################################################################################################################################
+
+#Get Model URL
+resp = requests.get("%s/api/2.0/clusters/list" % host, auth=auth)
+cluster_ids = [ cluster['cluster_id'] for cluster in resp.json()['clusters'] if cluster['cluster_name'] == 'mlflow-model-%s' % modelName and cluster['state'] == 'RUNNING' ]
+assert len(cluster_ids) == 1, 'Found invalid number of clusters: %s' % cluster_ids
+
+cluster_id = cluster_ids[0]
+full_url = "%s/driver-proxy-api/o/0/%s/8787/1/invocations" % (host, cluster_id)
+print("Full URL: %s" % full_url)
+
+#################################################################################################################################################################################
+
+%md 
+## Example Model Request
+
+#################################################################################################################################################################################
+
+resp = requests.post(full_url, auth=auth, headers={'Content-Type': 'application/json; format=pandas-records'},
+                   data=json.dumps([[3.0, 0.0, 0.0, 37.77231548637585, -122.43612044376671, 2.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.0, 3.0, 9.0, 84.0, 9.0, 9.0, 10.0, 10.0, 9.0, 9.0]]))
+print_response(resp)
+
+#################################################################################################################################################################################
+
+%md
+#FIN: The rest of the following code is useful code for interaction with the MLflow Model Registry API.
+
+#################################################################################################################################################################################
+
+# We can use `delete_registered_model` to delete an ENTIRE registered model (including all runs).
+# However, we are only allowed to do this when there are no versions of the model in active stages ('Production' or 'Staging')
+
+# We first transition model 2 to 'Archived'
+#Archive
+client.transition_model_version_stage(
+  name=model_name,
+  version=2,
+  stage="Archived",
+)
+
+time.sleep(20)
+
+# Now we can delete the ENTIRE model.
+client.delete_registered_model(model_name)
+
+#################################################################################################################################################################################
+
+%md 
+### Find best run
+
+#################################################################################################################################################################################
+
+runs = client.search_runs(experiment_id, order_by=["metrics.rmse ASC"], max_results=1)
+best_run = runs[0]
+best_run.info.run_id, best_run.data.metrics["mse"], best_run.data.params
+
+#################################################################################################################################################################################
+
+%md 
+### Wait functions due toa eventual consistency
+* Wait until a version is in the READY status
+
+#################################################################################################################################################################################
+
+import time
+from mlflow.entities.model_registry.model_version_status import ModelVersionStatus
+
+
+def wait_until_version_ready(model_name, model_version, sleep_time=1, iterations=100):
+  start = time.time()
+  for _ in range(iterations):
+    version = client.get_model_version(model_name, model_version.version)
+    status = ModelVersionStatus.from_string(version.status)
+    dt = time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(round(time.time())))
+    print(f"{dt}: Version {version.version} status: {ModelVersionStatus.to_string(status)}")
+    if status == ModelVersionStatus.READY:
+      break
+    elif status == ModelVersionStatus.FAILED_REGISTRATION:
+      raise Exception("Failed to register model.")
+  time.sleep(sleep_time)
+  end = time.time()
+  print(f"Waited {round(end-start,2)} seconds")
+
+#################################################################################################################################################################################
+
+%md 
+### Create registered model (if it doen't exist) and remove all versions
+
+#################################################################################################################################################################################
+
+from mlflow.exceptions import MlflowException, RestException
+
+try:
+    registered_model = client.get_registered_model(model_name)
+    print(f"Found {model_name}")
+    versions = client.get_latest_versions(model_name)
+    print(f"Found {len(versions)} versions")
+    for v in versions:
+        print(f"  version={v.version} status={v.status} stage={v.current_stage} run_id={v.run_id}")
+        client.transition_model_version_stage(model_name, v.version, stage="Archived")
+        client.delete_model_version(model_name, v.version)
+except RestException as e:
+    print("INFO:",e)
+    if e.error_code == "RESOURCE_DOES_NOT_EXIST":
+        print(f"Creating {model_name}")
+        registered_model = client.create_registered_model(model_name)
+    else:
+        raise Exception(e)
+
+#################################################################################################################################################################################
+
+%md 
+#List all registered models
+
+#################################################################################################################################################################################
+
+from pprint import pprint
+from mlflow.tracking.client import MlflowClient
+client = MlflowClient()
+for rm in client.list_registered_models():
+    pprint(dict(rm), indent=4)
+
+#################################################################################################################################################################################
+
+%run "./Includes/Classroom-Cleanup"
+
+#################################################################################################################################################################################
+
+%md
+## Additional Topics & Resources
+
+**Q:** Where can I find out more information on MLflow Model Registry?  
+**A:** Check out <a href="https://mlflow.org/docs/latest/registry.html#concepts" target="_blank"> for the latest API docs available for Model Registry</a>
+
+#################################################################################################################################################################################
